@@ -30,6 +30,8 @@ def calculate_num_blocks(file_size_mb: float, block_size_mb: int = 128) -> int:
         calculate_num_blocks(300, block_size_mb=128) -> 3  (2 blocos cheios + 1 parcial)
         calculate_num_blocks(1,   block_size_mb=128) -> 1
     """
+    if block_size_mb <= 0:
+        raise ValueError("block_size_mb deve ser maior que zero")
     if file_size_mb <= 0:
         return 0
     return int(math.ceil(file_size_mb / block_size_mb))
@@ -47,6 +49,8 @@ def calculate_total_storage_with_replication(file_size_mb: float, replication_fa
         calculate_total_storage_with_replication(100) -> 300
         calculate_total_storage_with_replication(100, replication_factor=1) -> 100
     """
+    if replication_factor <= 0:
+        raise ValueError("replication_factor deve ser maior que zero")
     if file_size_mb <= 0:
         return 0.0
     return float(file_size_mb * replication_factor)
@@ -70,6 +74,8 @@ def simulate_block_distribution(num_blocks: int, num_datanodes: int) -> dict:
           "datanode-3": [3, 6],
         }
     """
+    if num_datanodes <= 0:
+        raise ValueError("num_datanodes deve ser maior que zero")
     if num_blocks <= 0:
         return {f"datanode-{i}": [] for i in range(1, num_datanodes + 1)}
 
