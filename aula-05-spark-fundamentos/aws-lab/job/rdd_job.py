@@ -32,6 +32,9 @@ Como o script recebe um SparkContext:
 """
 
 import sys
+from urllib.parse import urlparse
+
+import boto3
 
 from pyspark.context import SparkContext
 from pyspark.sql import SparkSession
@@ -66,7 +69,14 @@ def word_count_rdd(sc, lines):
         word_count_rdd(sc, ["gato rato gato", "rato correu gato"])
         -> [("gato", 3), ("rato", 2), ("correu", 1)]
     """
-    raise NotImplementedError("TODO 1: implemente word_count_rdd")
+    counts = (
+        sc.parallelize(lines)
+        .flatMap(lambda line: line.lower().split())
+        .map(lambda word: (word, 1))
+        .reduceByKey(lambda left, right: left + right)
+        .collect()
+    )
+    return sorted(counts, key=lambda item: (-item[1], item[0]))
 
 
 def top_n_palavras(sc, lines, n):
@@ -82,7 +92,7 @@ def top_n_palavras(sc, lines, n):
         top_n_palavras(sc, ["gato rato gato", "rato correu gato"], 2)
         -> [("gato", 3), ("rato", 2)]
     """
-    raise NotImplementedError("TODO 2: implemente top_n_palavras")
+    return word_count_rdd(sc, lines)[:n]
 
 
 def main():
@@ -111,11 +121,14 @@ def main():
     for palavra, contagem in resultado:
         print(f"{palavra},{contagem}")
 
-    # Grava o resultado no S3 como texto: uma linha "palavra,contagem".
-    # Distribui a escrita entre os executors via RDD.saveAsTextFile.
-    sc.parallelize(resultado).map(
-        lambda t: f"{t[0]},{t[1]}"
-    ).saveAsTextFile(args["OUTPUT"])
+    output_uri = urlparse(args["OUTPUT"])
+    output_key = output_uri.path.strip("/") + "/part-00000"
+    output_body = "\n".join(f"{word},{count}" for word, count in resultado) + "\n"
+    boto3.client("s3").put_object(
+        Bucket=output_uri.netloc,
+        Key=output_key,
+        Body=output_body.encode("utf-8"),
+    )
 
     print(f"Resultado gravado em: {args['OUTPUT']}")
 

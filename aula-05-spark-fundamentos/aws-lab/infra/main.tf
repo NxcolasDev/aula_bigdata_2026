@@ -44,19 +44,30 @@ provider "aws" {
 #   - output/  : resultado do wordcount (gravado pelo job)
 #   - logs/    : logs do driver/executors do job
 # -----------------------------------------------------------------------------
-resource "aws_s3_bucket" "lab" {
-  bucket = var.bucket_nome
+resource "terraform_data" "bucket_lab" {
+  input = var.bucket_nome
+
+  provisioner "local-exec" {
+    command = "aws s3api head-bucket --bucket ${self.input} 2>/dev/null || aws s3api create-bucket --bucket ${self.input} --region ${var.regiao}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3 rm s3://${self.input} --recursive || true\naws s3api delete-bucket --bucket ${self.input} --region us-east-1 || true"
+  }
 }
 
 # -----------------------------------------------------------------------------
 # Bucket PRIVADO — bloqueia qualquer acesso público (os 4 bloqueios = true).
 # -----------------------------------------------------------------------------
 resource "aws_s3_bucket_public_access_block" "lab" {
-  bucket                  = aws_s3_bucket.lab.id
+  bucket                  = var.bucket_nome
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  depends_on = [terraform_data.bucket_lab]
 }
 
 # -----------------------------------------------------------------------------
@@ -66,10 +77,12 @@ resource "aws_s3_bucket_public_access_block" "lab" {
 # O etag (filemd5) força o re-upload sempre que o script mudar.
 # -----------------------------------------------------------------------------
 resource "aws_s3_object" "script" {
-  bucket = aws_s3_bucket.lab.id
+  bucket = var.bucket_nome
   key    = "scripts/rdd_job.py"
   source = "${path.module}/../job/rdd_job.py"
   etag   = filemd5("${path.module}/../job/rdd_job.py")
+
+  depends_on = [terraform_data.bucket_lab]
 }
 
 # -----------------------------------------------------------------------------
@@ -77,10 +90,12 @@ resource "aws_s3_object" "script" {
 # É o texto que o job vai ler (arg --INPUT). O etag força re-upload ao mudar.
 # -----------------------------------------------------------------------------
 resource "aws_s3_object" "input" {
-  bucket = aws_s3_bucket.lab.id
+  bucket = var.bucket_nome
   key    = "input/sample_lines.txt"
   source = "${path.module}/../data/sample_lines.txt"
   etag   = filemd5("${path.module}/../data/sample_lines.txt")
+
+  depends_on = [terraform_data.bucket_lab]
 }
 
 # -----------------------------------------------------------------------------
@@ -108,16 +123,21 @@ resource "aws_glue_job" "wordcount" {
   command {
     name            = "glueetl"
     python_version  = "3"
-    script_location = "s3://${aws_s3_bucket.lab.bucket}/scripts/rdd_job.py"
+    script_location = "s3://${var.bucket_nome}/scripts/rdd_job.py"
   }
 
   # Argumentos passados ao script (getResolvedOptions os lê como --INPUT etc.).
   default_arguments = {
-    "--INPUT"  = "s3://${aws_s3_bucket.lab.bucket}/input/sample_lines.txt"
-    "--OUTPUT" = "s3://${aws_s3_bucket.lab.bucket}/output/wordcount"
+    "--INPUT"  = "s3://${var.bucket_nome}/input/sample_lines.txt"
+    "--OUTPUT" = "s3://${var.bucket_nome}/output/wordcount"
     # Logs contínuos do Spark/driver no CloudWatch (grupo /aws-glue/jobs/output).
     "--enable-continuous-cloudwatch-log" = "true"
     # Diretório temporário exigido pelo Glue (fica dentro do mesmo bucket).
-    "--TempDir" = "s3://${aws_s3_bucket.lab.bucket}/tmp/"
+    "--TempDir" = "s3://${var.bucket_nome}/tmp/"
   }
+
+  depends_on = [
+    aws_s3_object.script,
+    aws_s3_object.input,
+  ]
 }
